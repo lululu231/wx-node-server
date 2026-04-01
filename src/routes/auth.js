@@ -24,9 +24,7 @@ router.post('/login', async (req, res) => {
         grant_type: 'authorization_code',
       },
     });
-
     const { openid } = wxRes.data;
-
     // 2️⃣ 查用户
     const [rows] = await db.execute(
       'SELECT * FROM user WHERE open_id = ?', 
