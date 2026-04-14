@@ -10,11 +10,111 @@ import {
   createCommunity,
   reviewCommunityService,
   banCommunityService,
-  unbanCommunityService
+  unbanCommunityService,
+  getCommunityMembersService,
+  changeMemberDepartmentService,
+  kickMemberService,
+  getPendingUsersByCommunityId,
+  approveUserJoin
 } from '../service/communityService.js';
+// controller/communityController.js
+// 获取列表（支持全部 / pending / joined / reject）
+export const getCommunityUsersController = async (req, res) => {
+    try {
+        const { communityId, status } = req.query
 
+        const data = await getPendingUsersByCommunityId(communityId, status)
+
+        res.json({
+            code: 0,
+            message: 'success',
+            data
+        })
+    } catch (err) {
+        res.json({
+            code: 1,
+            message: err.message
+        })
+    }
+}
+
+
+// 统一审核接口（通过 / 拒绝）
+export const auditUserController = async (req, res) => {
+    try {
+        const { communityId, userId, action } = req.body
+        // action: approve | reject
+
+        await approveUserJoin(communityId, userId, action)
+
+        res.json({
+            code: 0,
+            message: action === 'approve' ? '审核通过' : '已拒绝'
+        })
+    } catch (err) {
+        res.json({
+            code: 1,
+            message: err.message
+        })
+    }
+}
+export const kickMemberController = async (req, res) => {
+  try {
+    const { communityId, userId } = req.body;
+
+    if (!communityId || !userId) {
+      return res.status(400).json({ code:1,message: '参数缺失' });
+    }
+
+    await kickMemberService(communityId, userId);
+    res.json({ code:0,message: '已移除成员' });
+  } catch (err) {
+    res.status(500).json({ code:1,message: err.message || '操作失败' });
+  }
+};
+// controllers/communityController.js
 // controllers/communityController.js
 
+/**
+ * 普通成员更换部门
+ */
+export const changeDepartment = (req, res) => {
+  const { communityId, userId, departmentId,operatorUserId } = req.body;
+
+  changeMemberDepartmentService({
+    communityId,
+    targetUserId: userId,
+    operatorUserId,
+    departmentId
+  })
+    .then(() => res.json({ code:0, message: '修改成功' }))
+    .catch(err => res.status(400).json({ code: 1, message: err.message }));
+};
+
+/**
+ * Controller: 查询社团全部成员
+ */
+export const getCommunityMembersController = async (req, res) => {
+  try {
+    const { communityId } = req.params;
+    const { departmentId } = req.query;
+
+    const members = await getCommunityMembersService(
+      communityId,
+      departmentId || null
+    );
+
+    res.json({
+      code: 0,
+      data: members
+    });
+  } catch (err) {
+    res.status(500).json({
+      code: 1,
+      message: '查询失败'
+    });
+  }
+};
 // 封禁社团
 export const banCommunity = async (req, res) => {
   try {

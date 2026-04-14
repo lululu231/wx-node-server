@@ -10,14 +10,13 @@ router.post('/upload', upload.single('file'), (req, res) => {
       return res.status(400).json({ code: 1, msg: 'No file uploaded' });
     }
 
-    const fileUrl = `http://localhost:3000/uploads/${req.file.filename}`;
-
-    console.log('fileUrl:', fileUrl);
+    // ✅ 只返回路径
+    const filePath = `/uploads/${req.file.filename}`
 
     res.json({
       code: 0,
       msg: '上传成功',
-      url: fileUrl
+      url: filePath
     });
 
   } catch (err) {

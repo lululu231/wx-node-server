@@ -1,6 +1,210 @@
 import { db } from '../db/pool.js';
-// services/communityService.js
+// 获取待审核用户列表
+export const getPendingUsersByCommunityId = async (communityId, status) => {
+    if (!communityId) throw new Error('communityId 不能为空')
 
+    let sql = `
+        SELECT 
+            uc.*,
+            u.nick_name,
+            u.avatar_url,
+            u.phone_number,
+            u.gender
+        FROM user_community uc
+        LEFT JOIN user u 
+            ON uc.user_id = u.user_id
+        WHERE uc.community_id = ?
+    `
+
+    const params = [communityId]
+
+    // 👇 关键：动态 status 条件
+    if (status && status !== 'all') {
+        sql += ` AND uc.status = ?`
+        params.push(status)
+    }
+
+    sql += ` ORDER BY uc.join_time DESC`
+
+    const [rows] = await db.execute(sql, params)
+    return rows
+}
+
+export const approveUserJoin = async (communityId, userId, action) => {
+    if (!communityId || !userId) {
+        throw new Error('communityId 或 userId 不能为空')
+    }
+
+    // 白名单映射
+    const statusMap = {
+        approve: 'joined',
+        reject: 'reject'
+    }
+
+    const targetStatus = statusMap[action]
+
+    if (!targetStatus) {
+        throw new Error('非法审核操作')
+    }
+
+    const sql = `
+        UPDATE user_community
+        SET status = ?
+        WHERE community_id = ?
+            AND user_id = ?
+            AND status = 'pending'
+    `
+
+    const [result] = await db.execute(sql, [
+        targetStatus,
+        communityId,
+        userId
+    ])
+    console.log('communityId:', communityId)
+    console.log('userId:', userId)
+    console.log('action:', action)
+    console.log('result:', result)
+    // ======================
+    // ⭐ 核心：更新结果校验
+    // ======================
+    if (result.affectedRows === 0) {
+        throw new Error(`审核失败：当前状态为 ${targetStatus}`)
+    }
+
+    return true
+}
+/**
+ * 删除社团成员记录
+ * @param {number} communityId 
+ * @param {string} userId 
+ */
+export const kickMemberService = async (communityId, userId) => {
+  // 可以先检查用户是否在社团内（可选）
+  const deletedRows = await removeUserFromCommunity(communityId, userId);
+  if (deletedRows === 0) {
+    throw new Error('成员不存在或已被移除');
+  }
+  return true;
+};
+export const removeUserFromCommunity = async (communityId, userId) => {
+  const sql = `DELETE FROM user_community WHERE community_id = ? AND user_id = ?`;
+  const [result] = await db.query(sql, [communityId, userId]);
+  return result.affectedRows; // 返回删除的行数
+};
+/**
+ * 普通成员更换部门逻辑
+ * @param {Object} params
+ * @param {number} params.communityId
+ * @param {number} params.targetUserId
+ * @param {number} params.departmentId
+ * @param {number} params.currentUserId
+ */
+export const changeMemberDepartmentService = async ({
+    communityId,
+    targetUserId,
+    operatorUserId, // 谁操作的
+    departmentId
+  }) => {
+    // 1️⃣ 查询操作者在社团的职位
+    const [opRows] = await db.query(
+      `SELECT position FROM user_department_position 
+      WHERE community_id = ? AND user_id = ?`,
+      [communityId, operatorUserId]
+    );
+
+    if (!opRows.length) {
+      throw new Error('操作者未加入社团');
+    }
+
+    const operatorPosition = opRows[0].position;
+
+    // 只有社长或部长能调部门
+    if (operatorPosition !== '社长' && operatorPosition !== '部长') {
+      throw new Error('没有权限更换他人部门');
+    }
+
+    // 2️⃣ 查询目标用户
+    const [targetRows] = await db.query(
+      `SELECT position FROM user_department_position 
+      WHERE community_id = ? AND user_id = ?`,
+      [communityId, targetUserId]
+    );
+
+    if (!targetRows.length) {
+      throw new Error('目标用户未加入社团');
+    }
+
+    const targetPosition = targetRows[0].position;
+
+    // 只能调普通成员
+    if (targetPosition !== '普通成员') {
+      throw new Error('只能更换普通成员的部门');
+    }
+
+    // 3️⃣ 检查目标部门是否存在
+    const [deptRows] = await db.query(
+      `SELECT * FROM community_department 
+      WHERE department_id = ? AND community_id = ?`,
+      [departmentId, communityId]
+    );
+
+    if (!deptRows.length) {
+      throw new Error('目标部门不存在');
+    }
+
+    // 4️⃣ 执行更新
+    await db.query(
+      `UPDATE user_department_position 
+      SET department_id = ? 
+      WHERE community_id = ? AND user_id = ?`,
+      [departmentId, communityId, targetUserId]
+    );
+
+  return true;
+};
+/**
+ * 查询社团成员（支持按部门筛选）
+ * @param {number|string} communityId 社团ID
+ * @param {number|string|null} departmentId 部门ID（可选）
+ * @returns {Promise}
+ */
+export const getCommunityMembersService = (communityId, departmentId = null) => {
+  let sql = `
+    SELECT 
+      u.user_id,
+      u.nick_name,
+      u.avatar_url,
+      u.student_id,
+      u.gender,
+      u.phone_number,
+      d.department_id,
+      d.department_name,
+      udp.position
+    FROM user_community uc
+    INNER JOIN user u ON uc.user_id = u.user_id
+    LEFT JOIN user_department_position udp 
+      ON uc.community_id = udp.community_id AND uc.user_id = udp.user_id
+    LEFT JOIN community_department d 
+      ON udp.department_id = d.department_id
+    WHERE uc.community_id = ?
+      AND uc.status = 'joined'
+  `;
+
+  const params = [communityId];
+
+  // ✅ 动态加筛选条件
+  if (departmentId) {
+    sql += ` AND udp.department_id = ?`;
+    params.push(departmentId);
+  }
+
+  return db.query(sql, params)
+    .then(([rows]) => rows)
+    .catch(err => {
+      console.error('查询社团成员失败:', err);
+      throw err;
+    });
+};
 /**
  * 封禁社团
  * @param {number} communityId 社团ID
@@ -47,45 +251,71 @@ export const unbanCommunityService = async (communityId) => {
 // services/communityService.js
 
 export const reviewCommunityService = async ({ communityId, status }) => {
-  // 只允许 pending 的社团被审核
-  const [rows] = await db.query(
-    'SELECT status, creator_id FROM community WHERE id = ?',
-    [communityId]
-  );
+  const conn = await db.getConnection(); // ① 获取连接（事务必须用同一个连接）
 
-  if (rows.length === 0) {
-    throw new Error('社团不存在');
-  }
+  try {
+    await conn.beginTransaction(); // ② 开启事务
 
-  const community = rows[0];
-
-  if (community.status !== 'pending') {
-    throw new Error('该社团已审核，不能重复操作');
-  }
-
-  // 更新 status
-  const sql = `
-    UPDATE community
-    SET status = ?
-    WHERE id = ?
-  `;
-  await db.query(sql, [status, communityId]);
-
-  // 方法 B：审核通过才认定社长
-  if (status === 'approved') {
-    // 将申请人成为社长，加入社团
-    await db.query(
-      `INSERT INTO user_community (community_id, user_id, status, join_time)
-        VALUES (?, ?, 'joined', NOW())
-        ON DUPLICATE KEY UPDATE status = 'joined', join_time = NOW()`,
-      [communityId, community.creator_id]
+    // ③ 查询社团信息
+    const [rows] = await conn.query(
+      'SELECT status, creator_id FROM community WHERE id = ?',
+      [communityId]
     );
-  }
 
-  return {
-    communityId,
-    status
-  };
+    if (rows.length === 0) {
+      throw new Error('社团不存在');
+    }
+
+    const community = rows[0];
+
+    if (community.status !== 'pending') {
+      throw new Error('该社团已审核，不能重复操作');
+    }
+
+    // ④ 更新状态
+    await conn.query(
+      `UPDATE community SET status = ? WHERE id = ?`,
+      [status, communityId]
+    );
+
+    // ===============================
+    // ✅ 审核通过后的核心逻辑
+    // ===============================
+    if (status === 'approved') {
+      const creatorId = community.creator_id;
+
+      // ⑤ 加入社团
+      await conn.query(
+        `INSERT INTO user_community (community_id, user_id, status, join_time)
+          VALUES (?, ?, 'joined', NOW())
+          ON DUPLICATE KEY UPDATE status = 'joined', join_time = NOW()`,
+        [communityId, creatorId]
+      );
+
+      // ⑥ 设置为社长
+      await conn.query(
+        `INSERT INTO user_department_position
+          (user_id, community_id, department_id, position)
+          VALUES (?, ?, NULL, ?)
+          ON DUPLICATE KEY UPDATE position = ?`,
+        [creatorId, communityId, '社长', '社长']
+      );
+    }
+
+    await conn.commit(); // ✅ ⑦ 提交事务（全部成功才生效）
+
+    return {
+      communityId,
+      status
+    };
+
+  } catch (err) {
+    await conn.rollback(); // ❌ ⑧ 任何错误 → 回滚（全部撤销）
+    throw err;
+
+  } finally {
+    conn.release(); // ⑨ 释放连接（必须写）
+  }
 };
 /**
  * 🔥 多条件查询社团（推荐统一接口）

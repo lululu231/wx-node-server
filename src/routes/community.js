@@ -9,10 +9,18 @@ import
         queryCommunitiesController,
         reviewCommunity,
         banCommunity,
-        unbanCommunity
+        unbanCommunity,
+        getCommunityMembersController,
+        changeDepartment,
+        kickMemberController,
+        getCommunityUsersController,
+        auditUserController
     } from '../controller/communityController.js';
 
+
 const router = express.Router();
+// routes/community.js
+router.post('/kickMember', kickMemberController);
 
 // 获取用户已加入社团
 router.get('/joined', getJoinedCommunitiesController);
@@ -33,4 +41,13 @@ router.patch('/review', reviewCommunity);
 //解封/封禁社团
 router.post('/ban', banCommunity);
 router.post('/unban', unbanCommunity)
+
+router.get('/:communityId/members', getCommunityMembersController);
+//调部门
+router.post('/changeDepartment',  changeDepartment);
+//获取待审核列表
+router.get('/pendingMemberList', getCommunityUsersController)
+
+// 审核通过
+router.post('/audit', auditUserController)
 export default router;
