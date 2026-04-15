@@ -79,7 +79,7 @@ export const createNoticeService = async ({
     /**
      * 修改公告
      */
-    export const updateNoticeService = async (params) => {
+export const updateNoticeService = async (params) => {
     const {
         id,
         title,

@@ -6,6 +6,17 @@ import { upsertEvent,
     cancelEventAttendService,
     getMyCalendarEventsService 
 } from '../service/eventService.js';
+
+import { notificationQueue } from '../queue/notificationQueue.js';
+// const formatDateTime = (date) => {
+//     if (!date) return null;
+
+//     const d = new Date(date);
+
+//     return d.toISOString()
+//         .slice(0, 19)
+//         .replace('T', ' ');
+// };
 //查活动
 // controller/communityEventController.js
 import { db } from '../db/pool.js';
@@ -37,9 +48,7 @@ export const getMyCalendarEvents = async (req, res) => {
         });
     }
 };
-/**
- * 报名活动
- */
+
 export const joinEvent = async (req, res) => {
     const { eventId, userId } = req.body;
 
@@ -48,8 +57,68 @@ export const joinEvent = async (req, res) => {
     }
 
     try {
-        await joinEventService(eventId, userId);
+        // ======================
+        // 1️⃣ 写入报名关系
+        // ======================
+        const event = await joinEventService(eventId, userId);
+        // event 建议返回活动信息（name, start_time）
+
+        // ======================
+        // 2️⃣ 立即通知：报名成功
+        // ======================
+        await notificationQueue.add('EVENT_JOIN', {
+        type: 'EVENT_JOIN',
+        userId,
+        eventId,
+        eventName: event.name,
+        actorId: userId
+        });
+
+        // ======================
+        // 3️⃣ 延迟通知：活动提醒（提前1天）
+        // ======================
+        const startTime = new Date(event.start_time);
+        const remindTime = new Date(startTime);
+        remindTime.setDate(remindTime.getDate() - 1);
+
+        // const delay = remindTime.getTime() - Date.now();
+        const delay=5000
+        console.log('⏰ 时间计算:', {
+            startTime: event.start_time,
+            remindTime,
+            delay
+            });
+        console.log('📤 进逻辑了 EVENT_REMIND job');
+        if (delay > 0) {
+            // console.log('📤 准备创建 EVENT_REMIND job', {
+            // eventId,
+            // eventName,
+            // delay,
+            // now: Date.now()
+            // });
+        const job = await notificationQueue.add(
+            'EVENT_REMIND',
+            {
+                type: 'EVENT_REMIND',
+                userId,
+                eventId,
+                eventName:event.name,
+                eventTime: event.start_time
+            },
+            { delay }
+            );
+
+            console.log('✅ EVENT_REMIND 已入队:', {
+            jobId: job.id,
+            state: await job.getState()
+            });
+        }
+
+        // ======================
+        // 4️⃣ 返回结果
+        // ======================
         res.send({ code: 0, message: '报名成功' });
+
     } catch (err) {
         res.send({ code: 1, message: err.message });
     }

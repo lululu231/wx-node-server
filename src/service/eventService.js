@@ -22,8 +22,9 @@ export const getMyCalendarEventsService = async (userId) => {
     const [rows] = await db.query(sql, [userId]);
     return rows;
 };
+
 /**
- * 报名活动
+ * 报名活动（事务版 + 返回活动信息）
  */
 export const joinEventService = async (eventId, userId) => {
     const conn = await db.getConnection();
@@ -31,20 +32,11 @@ export const joinEventService = async (eventId, userId) => {
     try {
         await conn.beginTransaction();
 
-        // 1️⃣ 是否已经报名
-        const [exist] = await conn.execute(
-        `SELECT * FROM event_participant 
-        WHERE event_id = ? AND user_id = ? AND status = 'joined'`,
-        [eventId, userId]
-        );
-
-        if (exist.length > 0) {
-        throw new Error('已经报名过了');
-        }
-
-        // 2️⃣ 判断人数是否已满
+        // ======================
+        // 1️⃣ 查询活动信息（保留你的逻辑）
+        // ======================
         const [[event]] = await conn.execute(
-        `SELECT participant_count, max_count 
+        `SELECT id, title, start_time, participant_count, max_count
         FROM community_event 
         WHERE id = ?`,
         [eventId]
@@ -54,18 +46,41 @@ export const joinEventService = async (eventId, userId) => {
         throw new Error('活动不存在');
         }
 
-        if (event.max_count && event.participant_count >= event.max_count) {
-        throw new Error('活动人数已满');
-        }
-
-        // 3️⃣ 插入报名记录
-        await conn.execute(
-        `INSERT INTO event_participant (event_id, user_id, status)
-        VALUES (?, ?, 'joined')`,
+        // ======================
+        // 2️⃣ 查用户报名状态
+        // ======================
+        const [exist] = await conn.execute(
+        `SELECT id, status 
+        FROM event_participant 
+        WHERE event_id = ? AND user_id = ?`,
         [eventId, userId]
         );
 
-        // 4️⃣ 更新人数（防超卖）
+        if (exist.length > 0 && exist[0].status === 'joined') {
+        throw new Error('已经报名过了');
+        }
+
+        // ======================
+        // 3️⃣ 写入报名（支持取消后再报名）
+        // ======================
+        if (exist.length === 0) {
+        await conn.execute(
+            `INSERT INTO event_participant (event_id, user_id, status)
+            VALUES (?, ?, 'joined')`,
+            [eventId, userId]
+        );
+        } else {
+        await conn.execute(
+            `UPDATE event_participant 
+            SET status = 'joined'
+            WHERE event_id = ? AND user_id = ?`,
+            [eventId, userId]
+        );
+        }
+
+        // ======================
+        // 4️⃣ 原子更新人数（关键优化点）
+        // ======================
         const [result] = await conn.execute(
         `UPDATE community_event 
         SET participant_count = participant_count + 1
@@ -73,11 +88,26 @@ export const joinEventService = async (eventId, userId) => {
         [eventId]
         );
 
-        if (event.max_count && result.affectedRows === 0) {
-        throw new Error('活动人数已满（并发冲突）');
+        if (result.affectedRows === 0) {
+        throw new Error('活动人数已满');
         }
 
+        // ======================
+        // 5️⃣ 提交事务
+        // ======================
         await conn.commit();
+
+        // ======================
+        // 6️⃣ 返回完整活动信息（保留你的设计）
+        // ======================
+        return {
+        id: event.id,
+        name: event.title,
+        start_time: event.start_time,
+        participant_count: event.participant_count + 1,
+        max_count: event.max_count
+        };
+
     } catch (err) {
         await conn.rollback();
         throw err;

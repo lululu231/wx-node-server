@@ -227,6 +227,38 @@ CREATE TABLE `user_community`  (
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
+-- Table structure for notification
+-- ----------------------------
+DROP TABLE IF EXISTS `notification`;
+CREATE TABLE `notification` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '接收通知的用户ID',
+  `category` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '大类：community/event/social/system',
+  `type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '细分类型（枚举）',
+  `sub_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '更细粒度（可选扩展）',
+  `title` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '标题',
+  `content` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '内容（富文本/纯文本）',
+  `is_read` tinyint DEFAULT '0' COMMENT '0未读 1已读',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '软删除',
+  `related_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '业务类型（community/event/post/comment）',
+  `related_id` int DEFAULT NULL COMMENT '业务ID',
+  `actor_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '触发人（点赞/评论/审核人）',
+  `action_result` varchar(20) DEFAULT NULL COMMENT '结果：approved/rejected/created/canceled/started/upcoming',
+  `action_status` varchar(20) DEFAULT NULL COMMENT '状态流转：申请/通过/拒绝/取消/提醒',
+  `event_time` datetime DEFAULT NULL COMMENT '事件发生时间（如活动开始时间）',
+  `remind_time` datetime DEFAULT NULL COMMENT '提醒时间（定时通知用）',
+  `extra` json DEFAULT NULL COMMENT '扩展字段',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_user_read` (`user_id`,`is_read`),
+  KEY `idx_type` (`type`),
+  KEY `idx_category` (`category`),
+  KEY `idx_related` (`related_type`,`related_id`)
+) ENGINE = InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- ----------------------------
 -- Table structure for user_department_position
 -- ----------------------------
 DROP TABLE IF EXISTS `user_department_position`;
